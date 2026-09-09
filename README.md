@@ -2,215 +2,102 @@ ARMCall
 
 Runtime native function invocation for Android ARM32 and ARM64.
 
-ARMCall is a small C/C++ library for invoking native functions at runtime using architecture-specific ARM calling-convention stubs.
+ARMCall is a lightweight C/C++ library for invoking native functions at runtime using architecture-specific ARM calling-convention implementations.
 
-It targets Android's "armeabi-v7a" and "arm64-v8a" ABIs and provides a common runtime interface while keeping the low-level ABI implementation in architecture-specific assembly.
+It targets Android's "armeabi-v7a" and "arm64-v8a" ABIs while providing a common runtime interface across both architectures.
 
-«Status: Experimental / research»
+«Status: Experimental / Research»
 
 ---
 
 Overview
 
-Calling a native function dynamically is more complicated than simply branching to its address.
+Calling a native function dynamically requires more than transferring execution to its address. The caller must construct the machine state expected by the target function according to the platform's ABI.
 
-The caller must construct the machine state expected by the target function:
+ARMCall provides the low-level runtime needed to:
 
-- General-purpose argument registers
-- Floating-point/SIMD argument registers
-- Stack arguments
-- Stack alignment
-- Return-value registers
-- Callee-saved registers
-- Architecture-specific calling conventions
+- Prepare function arguments
+- Handle register and stack-based arguments
+- Support integer and floating-point values
+- Maintain required stack alignment
+- Invoke the target function
+- Retrieve return values
+- Preserve the required machine state
 
-ARMCall provides the low-level mechanism required to construct that state and transfer control to a target function.
+The architecture-specific implementation is written in ARM assembly, while the higher-level runtime interface is shared.
 
-The project currently supports:
+Supported Architectures
 
-Architecture| Android ABI| Instruction set
+Architecture| Android ABI| Instruction Set
 ARM32| "armeabi-v7a"| AArch32 / Thumb-2
 ARM64| "arm64-v8a"| AArch64
-
-These are the Android NDK's corresponding ARM ABIs.
-
----
-
-Design
-
-ARMCall intentionally keeps the architecture implementations in the same source files.
-
-src/
-├── runtime.cpp
-├── abi.cpp
-└── call.S
-
-Instead of maintaining:
-
-abi_arm32.cpp
-abi_arm64.cpp
-
-call_arm32.S
-call_arm64.S
-
-ARMCall uses compile-time architecture detection:
-
-#if defined(__aarch64__)
-
-    // AArch64
-
-#elif defined(__arm__)
-
-    // AArch32
-
-#endif
-
-The same approach is used by "call.S".
-
-#if defined(__aarch64__)
-
-    // AArch64 implementation
-
-#elif defined(__arm__)
-
-    // AArch32 implementation
-
-#endif
-
-This keeps the public runtime layer shared while allowing the generated machine code to be completely architecture-specific.
 
 ---
 
 How It Works
 
+ARMCall uses a runtime call context to describe the arguments and other information required for a function invocation.
+
 At a high level:
 
-                    Runtime
-                       │
-                       │
-                 CallContext
-                       │
-                       ▼
-                ┌─────────────┐
-                │   abi.cpp   │
-                └──────┬──────┘
-                       │
-             ┌─────────┴─────────┐
-             │                   │
-          ARM32                 ARM64
-         __arm__            __aarch64__
-             │                   │
-             ▼                   ▼
-       arm32_invoke         arm64_invoke
-             │                   │
-             └─────────┬─────────┘
-                       │
-                       ▼
-                    call.S
-                       │
-                       ▼
-                Target function
+                 Runtime
+                    │
+                    ▼
+              CallContext
+                    │
+                    ▼
+              ABI Interface
+                    │
+          ┌─────────┴─────────┐
+          │                   │
+        ARM32               ARM64
+       AArch32              AArch64
+          │                   │
+          └─────────┬─────────┘
+                    ▼
+             Assembly Stub
+                    │
+                    ▼
+             Target Function
+                    │
+                    ▼
+               CallResult
 
-The runtime prepares a call context containing the values that need to be placed into the target ABI's argument locations.
-
-The assembly stub then:
-
-1. Saves the registers required by the stub.
-2. Reads the runtime call context.
-3. Constructs the required stack argument area.
-4. Loads the appropriate argument registers.
-5. Transfers control to the target function.
-6. Collects the return registers.
-7. Restores the caller's state.
-8. Returns to the runtime.
+The runtime prepares the call context, and the architecture-specific assembly stub converts that information into the machine state required by the target ABI.
 
 ---
+
+Architecture Support
 
 ARM64
 
-ARM64 uses the AArch64 procedure call standard.
+ARM64 follows the AArch64 Procedure Call Standard (AAPCS64).
 
-The AArch64 PCS defines how separately compiled or assembled routines communicate through an externally visible interface.
-
-ARMCall's ARM64 implementation works with the AArch64 register file and its argument/return-value conventions.
-
-The general-purpose argument registers are primarily:
-
-x0 - x7
-
-Floating-point/SIMD arguments use the appropriate SIMD/FP registers.
-
-Additional arguments can be represented in the stack argument area.
-
-The implementation is contained in:
-
-src/call.S
-
-and selected with:
-
-#if defined(__aarch64__)
-
----
+ARMCall supports the primary general-purpose argument registers and floating-point/SIMD argument registers defined by the ABI, with additional arguments represented through the stack argument area where required.
 
 ARM32
 
-ARM32 uses the Arm 32-bit procedure call standard and supports the Arm/Thumb instruction sets.
+ARM32 follows the AArch32 Procedure Call Standard (AAPCS32) and supports the Android "armeabi-v7a" ABI.
 
-For Android, "armeabi-v7a" is the 32-bit ARM ABI and includes Thumb-2 and Neon support. The Android NDK uses "-mfloat-abi=softfp" for this ABI's floating-point calling convention.
-
-ARMCall's ARM32 implementation uses the core argument registers:
-
-r0 - r3
-
-with additional arguments represented in the stack argument area.
-
-The assembly implementation is selected with:
-
-#if defined(__arm__)
-
----
-
-Why "call.S"?
-
-The assembly source intentionally uses an uppercase ".S" extension:
-
-call.S
-
-rather than:
-
-call.s
-
-This allows the assembly source to pass through the C preprocessor.
-
-That makes architecture selection possible directly inside the assembly source:
-
-#if defined(__aarch64__)
-
-    // ARM64 assembly
-
-#elif defined(__arm__)
-
-    // ARM32 assembly
-
-#endif
-
-As a result, the same "call.S" source can produce two completely different object files.
+The implementation uses the standard ARM32 argument registers and stack argument area according to the target ABI.
 
 ---
 
 Build System
 
-ARMCall uses a small GNU Make build system and Clang from the Android NDK.
+ARMCall uses GNU Make together with the Android NDK's Clang toolchain.
 
-The build targets are:
+Supported targets:
 
 aarch64-linux-android
 armv7a-linux-androideabi
 
-The Android NDK identifies these corresponding ABIs as:
+These correspond to:
 
 arm64-v8a
 armeabi-v7a
+
+The same source tree can be used to build both architectures.
 
 ---
 
@@ -219,10 +106,10 @@ Requirements
 - Android NDK
 - Clang / Clang++
 - GNU Make
-- LLVM binutils ("llvm-strip")
-- Android API level 21 or newer by default
+- LLVM binutils
+- Android API level 21 or newer
 
-The Makefile uses Clang's cross-compilation support rather than requiring separate compiler installations for ARM32 and ARM64.
+No separate ARM32 and ARM64 compiler installations are required.
 
 ---
 
@@ -240,11 +127,11 @@ Build only ARM32:
 
 make arm32
 
-Clean the build directory:
+Clean build files:
 
 make clean
 
-Strip the resulting libraries:
+Strip generated libraries:
 
 make strip
 
@@ -256,11 +143,9 @@ make info
 
 Android API Level
 
-The default API level is:
+The default Android API level is 21.
 
-21
-
-It can be overridden from the command line:
+It can be overridden when building:
 
 make API=24
 
@@ -268,117 +153,59 @@ or:
 
 make API=29
 
-The API level becomes part of the Clang target triple.
-
-For example:
-
-aarch64-linux-android24
-armv7a-linux-androideabi24
+The selected API level is passed to Clang through the Android target configuration.
 
 ---
 
 Build Output
 
-Running:
-
-make
-
-produces:
+A successful build produces:
 
 build/
-└── lib/
-    ├── arm64-v8a/
-    │   └── libarmcall.so
-    │
-    └── armeabi-v7a/
-        └── libarmcall.so
-
-The architecture-specific object files are also kept separate:
-
-build/
+├── lib/
+│   ├── arm64-v8a/
+│   │   └── libarmcall.so
+│   │
+│   └── armeabi-v7a/
+│       └── libarmcall.so
+│
 └── obj/
     ├── arm64/
-    │   ├── runtime.o
-    │   ├── abi.o
-    │   └── call.o
-    │
     └── arm32/
-        ├── runtime.o
-        ├── abi.o
-        └── call.o
 
-This separation is important because "abi.cpp" and "call.S" are compiled independently for each architecture.
-
----
-
-Example Build
-
-$ make
-
-Expected structure:
-
-build/lib/arm64-v8a/libarmcall.so
-build/lib/armeabi-v7a/libarmcall.so
-
-The same source files:
-
-src/abi.cpp
-src/call.S
-
-are compiled once for each target.
-
-Conceptually:
-
-                  abi.cpp
-                 /       \
-                /         \
-        ARM32 compiler   ARM64 compiler
-             │               │
-             ▼               ▼
-        arm32/abi.o     arm64/abi.o
-
-
-                  call.S
-                 /      \
-                /        \
-        ARM32 compiler  ARM64 compiler
-             │              │
-             ▼              ▼
-       arm32/call.o   arm64/call.o
+The generated files under "build/" should normally not be committed to the repository.
 
 ---
 
 Runtime Model
 
-ARMCall is designed around a runtime call context.
+ARMCall is based around two main concepts:
 
-Conceptually, a context contains information such as:
+"CallContext"
 
-CallContext
-├── General-purpose arguments
-├── Floating-point arguments
-├── Stack argument buffer
-└── Stack argument size
+Describes the information required to perform a native function call, including:
 
-The architecture-specific stub consumes this context and converts it into the machine state required by the target ABI.
+- General-purpose arguments
+- Floating-point arguments
+- Stack arguments
+- Stack argument size
+- Other ABI-specific information
 
-A corresponding result structure can hold values returned by the target:
+"CallResult"
 
-CallResult
-├── Integer/general-purpose result
-└── Floating-point result
+Contains values returned by the target function.
 
-The exact representation is implementation-specific and may evolve as additional ABI cases are supported.
+The exact representation may evolve as ARMCall gains support for additional ABI cases.
 
 ---
 
-Important: Function Signatures
+Function Signatures
 
 ARMCall does not automatically determine the complete type signature of an arbitrary function from its address.
 
-For a correct invocation, the runtime must know enough information about the target function to construct the appropriate call context.
+The caller must provide sufficient information for ARMCall to construct a valid ABI-compatible call.
 
-For example, these are not equivalent:
+For example:
 
 int function(int);
 
@@ -386,27 +213,19 @@ and:
 
 int function(double);
 
-Although both have one argument, the ABI may place those arguments in different register classes.
+have different ABI requirements even though both functions receive a single argument.
 
-Likewise:
+Similarly, functions with more arguments may require part of their argument list to be placed in the stack argument area.
 
-void function(int, int, int, int, int);
-
-requires different handling from:
-
-void function(int, int);
-
-because additional arguments may cross from registers into the stack argument area.
-
-Therefore, callers must provide ABI-compatible argument metadata.
+Correct type and ABI metadata is therefore essential for safe invocation.
 
 ---
 
 ABI Correctness
 
-ARMCall operates directly at the calling-convention level.
+ARMCall operates directly at the calling-convention level. Correctness depends on accurately following the target architecture's ABI.
 
-Correctness depends on maintaining the requirements of the target ABI, including:
+Important areas include:
 
 - Argument classification
 - Register allocation
@@ -415,62 +234,65 @@ Correctness depends on maintaining the requirements of the target ABI, including
 - Register preservation
 - Return-value classification
 - Floating-point/SIMD handling
-- Architecture-specific instruction state
+- Architecture-specific ABI rules
 
-The Arm ABI specifications define the contract between callers and callees, including the obligations around machine state and register preservation.
+For supported architectures, ARMCall follows the relevant Arm procedure call standards.
 
 ---
 
 Project Structure
 
 ARMCall/
-│
 ├── src/
-│   ├── runtime.cpp       # Runtime layer
-│   ├── abi.cpp           # Architecture-independent ABI interface
-│   └── call.S            # ARM32/ARM64 call stubs
+│   ├── runtime.cpp
+│   ├── abi.cpp
+│   └── call.S
 │
 ├── Makefile
 ├── LICENSE
 └── README.md
 
-Generated files are intentionally kept under:
+Source Files
 
-build/
+File| Purpose
+"runtime.cpp"| Runtime interface and call management
+"abi.cpp"| ABI-level call preparation
+"call.S"| Architecture-specific assembly invocation
+"Makefile"| Build configuration
 
-and should normally not be committed to the repository.
+The architecture-specific implementation is selected automatically during compilation.
 
 ---
 
-Design Principles
+Design Goals
 
-Single Source
+Lightweight
 
-ARM32 and ARM64 share the same high-level source files.
+ARMCall focuses on the core mechanism required for runtime native invocation without introducing a large runtime dependency.
 
-Explicit ABI Handling
+Shared Interface
 
-The library does not attempt to hide the underlying calling convention from the implementation.
+ARM32 and ARM64 use the same high-level runtime interface.
 
-Minimal Runtime Overhead
+Architecture-Specific Implementation
 
-The core mechanism is implemented close to the machine-code level.
+Low-level calling-convention details remain isolated in architecture-specific code.
 
-Architecture Isolation
+Low Overhead
 
-Each architecture gets its own object files and final shared library.
+The invocation mechanism operates close to the machine-code level to minimize unnecessary runtime overhead.
 
-Portable Build Interface
+Simple Build
 
-The same Makefile can produce both Android ARM ABIs.
+A single Makefile can build both Android ARM architectures.
 
 ---
 
 Limitations
 
-ARMCall is intentionally low-level and currently does not attempt to solve every possible native ABI case.
+ARMCall is currently experimental and does not attempt to cover every possible native ABI case.
 
-Potential limitations include:
+Some limitations may include:
 
 - Complex aggregate arguments
 - Homogeneous floating-point aggregates
@@ -478,18 +300,18 @@ Potential limitations include:
 - Large structure returns
 - Complex C++ ABI types
 - Exception propagation
-- Advanced SIMD/vector argument cases
+- Advanced SIMD/vector arguments
 - Architecture-specific ABI extensions
 
-Support for these cases requires additional classification and runtime metadata.
+Support for these cases requires additional ABI classification and runtime metadata.
 
 ---
 
 Safety
 
-An invalid call context can corrupt the process state.
+ARMCall is a low-level ABI interface. Incorrect call metadata can result in undefined behavior, memory corruption, or a native crash.
 
-Incorrect:
+Particular care must be taken with:
 
 - Argument types
 - Argument sizes
@@ -498,9 +320,9 @@ Incorrect:
 - Stack alignment
 - Return-value interpretation
 
-can result in undefined behavior or a native crash.
+ARMCall should therefore not be considered a type-safe replacement for ordinary C/C++ function calls.
 
-ARMCall should therefore be treated as a low-level ABI interface, not as a type-safe replacement for normal C/C++ calls.
+Use it only when the target function's ABI and signature are known.
 
 ---
 
@@ -509,48 +331,16 @@ Use Cases
 ARMCall is intended for legitimate low-level software development and research, including:
 
 - Runtime systems
-- Native interoperability
 - Foreign-function interfaces
+- Native interoperability
 - ABI experimentation
 - Binary analysis
 - Reverse-engineering research
 - Instrumentation
 - Debugging
-- Emulator/runtime development
+- Emulator and runtime development
 - Compiler and language-runtime experiments
 - Native Android development
-
----
-
-Non-Goals
-
-ARMCall is not intended to be:
-
-- A general-purpose reflection system
-- A C++ type introspection system
-- A complete foreign-function interface for every platform
-- A replacement for normal static function calls
-- A universal function-signature inference engine
-
-Its scope is deliberately narrower: constructing and performing native ARM calls from runtime call information.
-
----
-
-Roadmap
-
-- [ ] Improve integer argument handling
-- [ ] Improve floating-point argument handling
-- [ ] Support additional return-value classifications
-- [ ] Improve aggregate/struct argument support
-- [ ] Improve variadic-call support
-- [ ] Add ABI validation
-- [ ] Add automated ARM32 tests
-- [ ] Add automated ARM64 tests
-- [ ] Add benchmark suite
-- [ ] Add C API
-- [ ] Add higher-level C++ API
-- [ ] Add Android example project
-- [ ] Expand documentation for ABI edge cases
 
 ---
 
@@ -558,41 +348,17 @@ Contributing
 
 Contributions are welcome.
 
-When modifying architecture-specific code, keep ARM32 and ARM64 implementations clearly separated:
-
-#if defined(__aarch64__)
-
-    // AArch64
-
-#elif defined(__arm__)
-
-    // AArch32
-
-#endif
-
-For assembly:
-
-#if defined(__aarch64__)
-
-    // AArch64
-
-#elif defined(__arm__)
-
-    // AArch32
-
-#endif
-
-Changes should be tested against both supported targets:
+When modifying ARM-specific code, ensure that changes remain compatible with both supported architectures:
 
 arm64-v8a
 armeabi-v7a
 
-Before submitting a pull request, verify that:
+Before submitting a change, verify that both targets build successfully:
 
 make clean
 make
 
-successfully produces both shared libraries.
+Architecture-specific changes should be tested on the corresponding Android ABI whenever possible.
 
 ---
 
@@ -619,20 +385,15 @@ References
 - "AAPCS32 — Procedure Call Standard for the Arm 32-bit Architecture" (https://github.com/ARM-software/abi-aa/blob/main/aapcs32/aapcs32.rst)
 - "AAPCS64 — Procedure Call Standard for the Arm 64-bit Architecture" (https://github.com/ARM-software/abi-aa/blob/main/aapcs64/aapcs64.rst)
 
-The ARM ABI repository contains the current AAPCS32/AAPCS64 specifications and related ABI documents.
-
 ---
 
 Status
 
-ARM32 / ARM64 support: Experimental
-
-Platform: Android
-
-Language: C / C++ / ARM Assembly
-
-Build system: GNU Make
-
-Toolchain: LLVM/Clang
-
-Supported ABIs: "armeabi-v7a", "arm64-v8a"
+Component| Status
+ARM32| Experimental
+ARM64| Experimental
+Platform| Android
+Languages| C / C++ / ARM Assembly
+Build System| GNU Make
+Toolchain| LLVM / Clang
+ABIs| "armeabi-v7a", "arm64-v8a"
