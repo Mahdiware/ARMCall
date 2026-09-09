@@ -160,7 +160,7 @@ The selected API level is passed to Clang through the Android target configurati
 Build Output
 
 A successful build produces:
-
+```
 build/
 ├── lib/
 │   ├── arm64-v8a/
@@ -172,7 +172,7 @@ build/
 └── obj/
     ├── arm64/
     └── arm32/
-
+```
 The generated files under "build/" should normally not be committed to the repository.
 
 ---
@@ -241,7 +241,7 @@ For supported architectures, ARMCall follows the relevant Arm procedure call sta
 ---
 
 Project Structure
-
+```
 ARMCall/
 ├── src/
 │   ├── runtime.cpp
@@ -251,7 +251,7 @@ ARMCall/
 ├── Makefile
 ├── LICENSE
 └── README.md
-
+```
 Source Files
 
 File| Purpose
